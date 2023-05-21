@@ -1,0 +1,22 @@
+{
+  "name": "google-calendar-cli",
+  "version": "1.0.0",
+  "description": "A CLI tool to interact with Google Calendar",
+  "main": "bin/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cli"
+  ],
+  "bin": {
+    "gcal": "./bin/index.js"
+  },
+  "author": "Jeffrey Gbeho",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/local-auth": "^2.1.0",
+    "googleapis": "^105.0.0",
+    "yargs": "^17.7.2"
+  }
+}
