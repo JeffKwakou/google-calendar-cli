@@ -1,107 +1,175 @@
 #! /usr/bin/env node
 const yargs = require('yargs');
-const fs = require('fs').promises;
-const path = require('path');
-const process = require('process');
-const {authenticate} = require('@google-cloud/local-auth');
-const {google} = require('googleapis');
+const {authorize, credentialsFileExist, setApiCredentials} = require('../modules/auth.js');
+const inquirer = require('inquirer');
+const DatePrompt = require('inquirer-date-prompt');
+const {listEvents, createEvent, updateEvent, deleteEvent, getEvent} = require('../modules/calendar.js');
 
-// Docs des options, acces avec --help
-const usage = "\nUsage: tran <lang_name> sentence or words to be translated";const options = yargs 
- .usage(usage) 
- .option("l", {alias:"languages", describe: "List all languages supported.", type: "boolean", demandOption 
-: false })  
- .help(true) 
- .argv; 
+inquirer.registerPrompt("date", DatePrompt);
 
-const argv = require('yargs/yargs')(process.argv.slice(2)).argv;
+// Commands documentation, acces with --help
+const usage = "\n Usage: Manage your Google Calendar with this CLI tool\n";
+yargs.usage(usage)
+.option ("h", {alias:"help", describe: "Show help", type: "void", demandOption: false })
+.option("c", {alias:"config", describe: "Config google credentials", type: "void", demandOption: false })
+.option("i", {alias:"client_id", describe: "Set the client id key of Google Calendar API", type: "string", demandOption: false }) 
+.option("s", {alias:"client_secret", describe: "Set the client secret key of Google Calendar API", type: "string", demandOption: false })  
+.option("p", {alias:"project_id", describe: "Set the project id of Google Calendar API", type: "string", demandOption: false })
+.option("l", {alias:"events", describe: "List all events in Google Calendar", type: "void", demandOption: false })
+.option("n", {alias:"new_event", describe: "Create a new event in Google Calendar", type: "void", demandOption: false })
+.option("u", {alias:"update_event", describe: "Update an event in Google Calendar", type: "string", demandOption: false })
+.option("d", {alias:"delete_event", describe: "Delete an event in Google Calendar", type: "string", demandOption: false })
+.help(true) 
+.argv; 
 
-console.log(argv);
+const arguments = yargs.argv;
 
-// If modifying these scopes, delete token.json.
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
-// The file token.json stores the user's access and refresh tokens, and is
-// created automatically when the authorization flow completes for the first
-// time.
-const TOKEN_PATH = path.join(process.cwd(), 'token.json');
-const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
+// Verify if credentials file exist and create it if not
+credentialsFileExist();
 
-/**
- * Reads previously authorized credentials from the save file.
- *
- * @return {Promise<OAuth2Client|null>}
- */
-async function loadSavedCredentialsIfExist() {
-  try {
-    const content = await fs.readFile(TOKEN_PATH);
-    const credentials = JSON.parse(content);
-    return google.auth.fromJSON(credentials);
-  } catch (err) {
-    return null;
-  }
+// Handle commands
+if (arguments.client_id) {
+  setApiCredentials({client_id: arguments.client_id});
 }
-
-/**
- * Serializes credentials to a file compatible with GoogleAUth.fromJSON.
- *
- * @param {OAuth2Client} client
- * @return {Promise<void>}
- */
-async function saveCredentials(client) {
-  const content = await fs.readFile(CREDENTIALS_PATH);
-  const keys = JSON.parse(content);
-  const key = keys.installed || keys.web;
-  const payload = JSON.stringify({
-    type: 'authorized_user',
-    client_id: key.client_id,
-    client_secret: key.client_secret,
-    refresh_token: client.credentials.refresh_token,
-  });
-  await fs.writeFile(TOKEN_PATH, payload);
+if (arguments.client_secret) {
+  setApiCredentials({client_secret: arguments.client_secret});
 }
-
-/**
- * Load or request or authorization to call APIs.
- *
- */
-async function authorize() {
-  let client = await loadSavedCredentialsIfExist();
-  if (client) {
-    return client;
-  }
-  client = await authenticate({
-    scopes: SCOPES,
-    keyfilePath: CREDENTIALS_PATH,
-  });
-  if (client.credentials) {
-    await saveCredentials(client);
-  }
-  return client;
+if (arguments.project_id) {
+  setApiCredentials({project_id: arguments.project_id});
 }
-
-/**
- * Lists the next 10 events on the user's primary calendar.
- * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
- */
-async function listEvents(auth) {
-  const calendar = google.calendar({version: 'v3', auth});
-  const res = await calendar.events.list({
-    calendarId: 'primary',
-    timeMin: new Date().toISOString(),
-    maxResults: 10,
-    singleEvents: true,
-    orderBy: 'startTime',
-  });
-  const events = res.data.items;
-  if (!events || events.length === 0) {
-    console.log('No upcoming events found.');
-    return;
-  }
-  console.log('Upcoming 10 events:');
-  events.map((event, i) => {
-    const start = event.start.dateTime || event.start.date;
-    console.log(`${start} - ${event.summary}`);
+if (arguments.hasOwnProperty("config")) { 
+    inquirer.prompt([
+      {
+          name: 'client_id',
+          type: 'input',
+          message: 'Enter your google client id:',
+          validate: function( value ) {
+            if (value.length) {
+              return true;
+            } else {
+              return ;
+            }
+          }
+      },
+      {
+        name: 'client_secret',
+        type: 'input',
+        message: 'Enter your google client secret:',
+        validate: function( value ) {
+          if (value.length) {
+            return true;
+          } else {
+            return 'Please enter your google client secret.';
+          }
+        }
+    },
+    {
+      name: 'project_id',
+      type: 'input',
+      message: 'Enter your google project id:',
+      validate: function( value ) {
+        if (value.length) {
+          return true;
+        } else {
+          return 'Please enter your google project id.';
+        }
+      }
+  },
+  ]).then(answers => {
+      setApiCredentials(answers);
   });
 }
+if (arguments.hasOwnProperty("new_event")) {
+    inquirer.prompt([
+        {
+            name: 'title',
+            type: 'input',
+            message: 'Enter the event title:',
+            validate: function( value ) {
+              if (value.length) {
+                return true;
+              } else {
+                return 'Please enter the event title.';
+              }
+            }
+        },
+        {
+          name: 'description',
+          type: 'input',
+          message: 'Enter the event description:'
+      },
+        {
+            name: 'start_date',
+            type: 'date',
+            message: 'Choose a start date of the event:'
+        },
+        {
+          name: 'end_date',
+          type: 'date',
+          message: 'Choose a end date of the event:'
+      },
+    ]).then(answers => {
+        authorize().then((auth) => {
+          createEvent(auth, answers);
+        }).catch(console.error);
+    });
+}
+if (arguments.hasOwnProperty("update_event") && arguments.update_event) {
+  authorize().then((auth) => {
+    getEvent(auth, arguments.update_event).then((event) => {
+      inquirer.prompt([
+          {
+              name: 'title',
+              default: event.summary,
+              type: 'input',
+              message: 'Enter the event title:',
+              validate: function( value ) {
+                if (value.length) {
+                  return true;
+                } else {
+                  return 'Please enter the event title.';
+                }
+              }
+          },
+          {
+            name: 'description',
+            default: event.description,
+            type: 'input',
+            message: 'Enter the event description:'
+        },
+        {
+            name: 'start_date',
+            type: 'date',
+            message: 'Choose a start date of the event:',
+            default: new Date(event.start.dateTime)
+        },
+        {
+          name: 'end_date',
+          type: 'date',
+          message: 'Choose a end date of the event:',
+          default: new Date(event.end.dateTime)
+        },
+      ]).then(answers => {
+        event.summary = answers.title;
+        event.description = answers.description;
+        event.start.dateTime = answers.start_date;
+        event.end.dateTime = answers.end_date;
 
-authorize().then(listEvents).catch(console.error);
+        updateEvent(auth, arguments.update_event, event);
+      });
+      
+    }).catch(console.error);
+  }).catch(console.error);
+}
+if (arguments.hasOwnProperty("events")) {
+  authorize().then((auth) => {
+    listEvents(auth);
+  }).catch(console.error)
+} 
+if (arguments.delete_event) {
+  authorize().then((auth) => {
+    deleteEvent(auth, arguments.delete_event);
+  }).catch(console.error)
+}
+
+
